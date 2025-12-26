@@ -158,9 +158,27 @@ def L_model_forward(X, parameters):
             
     return AL, caches
 
+def dropout_forward(A, keep_prob):
+    """
+    Apply dropout during forward propagation.
+    
+    Parameters:
+    A: activations from previous layer
+    keep_prob: probability of keeping a neuron (0.5 = 50% dropout)
+    
+    Returns:
+    A: activations with dropout applied
+    mask: dropout mask (for backprop)
+    """
+    mask = np.random.rand(*A.shape) < keep_prob
+    A = A * mask
+    A = A / keep_prob  # Inverted dropout - scale up to maintain expected value
+    
+    return A, mask
+
 
     # COST
-def compute_cost(AL, Y):
+def compute_cost(AL, Y, parameters=None, lambd=0.0):
     # Categorical cross-entropy cost for multi-class classification.
     # AL: shape (24, m) - predictions for 24 classes
     # Y: shape (1, m) - true labels (integers 0-23)
@@ -171,17 +189,26 @@ def compute_cost(AL, Y):
     Y_one_hot[Y.astype(int), np.arange(m)] = 1
     # Categorical cross-entropy
     cost = -np.sum(Y_one_hot * np.log(AL + 1e-8)) / m
+    
+    # L2 regularization
+    if lambd > 0 and parameters is not None:
+        L = len(parameters) // 2
+        L2_cost = 0
+        for l in range(1, L+1):
+            L2_cost += np.sum(np.square(parameters['W' + str(l)]))
+        L2_cost = (lambd / (2 * m)) * L2_cost
+        cost = cost + L2_cost
     cost = np.squeeze(cost)
     
     return cost
 
 
     # BACKWARD
-def linear_backward(dZ, cache):
+def linear_backward(dZ, cache, lambd=0.0):
     A_prev, W, b = cache
     m = A_prev.shape[1]
 
-    dW = 1./m * np.dot(dZ,A_prev.T)
+    dW = 1./m * np.dot(dZ,A_prev.T) + (lambd/m) * W  # Add L2 gradient
     db = 1./m * np.sum(dZ, axis = 1, keepdims = True)
     dA_prev = np.dot(W.T,dZ)
     
@@ -191,16 +218,16 @@ def linear_backward(dZ, cache):
     
     return dA_prev, dW, db
 
-def linear_activation_backward(dA, cache, activation):
+def linear_activation_backward(dA, cache, activation, lambd=0.0):
     linear_cache, activation_cache = cache
     
     if activation == "relu":
         dZ = relu_backward(dA, activation_cache)
-        dA_prev, dW, db = linear_backward(dZ, linear_cache)
+        dA_prev, dW, db = linear_backward(dZ, linear_cache, lambd=lambd)
         
     elif activation == "sigmoid":
         dZ = sigmoid_backward(dA, activation_cache)
-        dA_prev, dW, db = linear_backward(dZ, linear_cache)
+        dA_prev, dW, db = linear_backward(dZ, linear_cache, lambd=lambd)
         
     else:
         print("Error! Please make sure you have passed the value correctly in the \"activation\" parameter")
@@ -235,6 +262,23 @@ def L_model_backward(AL, Y, caches):
 
     return grads
 
+def dropout_backward(dA, mask, keep_prob):
+    """
+    Apply dropout during backpropagation.
+    
+    Parameters:
+    dA: gradient from next layer
+    mask: dropout mask from forward pass
+    keep_prob: same as forward
+    
+    Returns:
+    dA: gradient with dropout applied
+    """
+    dA = dA * mask
+    dA = dA / keep_prob
+    
+    return dA
+
 
     # UPDATE PARAMS.
 def update_parameters(parameters, grads, learning_rate):
@@ -245,3 +289,4 @@ def update_parameters(parameters, grads, learning_rate):
         parameters["b" + str(l+1)] = parameters["b" + str(l+1)] - learning_rate * grads["db" + str(l+1)]
         
     return parameters
+
